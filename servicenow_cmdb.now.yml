@@ -1,0 +1,19 @@
+---
+plugin: servicenow.itsm.now
+table: cmdb_ci_server
+inventory_hostname_source: name
+query_limit_columns: true
+
+columns:
+  - name
+  - ip_address
+  - os
+  - operational_status
+  - install_status
+
+compose:
+  ansible_host: ip_address
+
+keyed_groups:
+  - key: os
+    prefix: os
