@@ -14,7 +14,7 @@
 - name: Create CSV summary header on control node
   ansible.builtin.copy:
     dest: "{{ playbook_dir }}/../reports/health-summary.csv"
-    content: "Host,IP,OS,DiskUsagePercent,MemoryUsagePercent,LoadAverage1m,DiskIssue,MemoryIssue,LoadIssue,ServiceIssue,FailedServicesCount,FailedServicesIssue,OverallStatus\n"
+    content: "Host,IP,OS,DiskUsagePercent,MemoryUsagePercent,CPUUsagePercent,LoadAverage1m,InodeUsagePercent,UpdatesAvailable,RebootRequired,DiskIssue,MemoryIssue,CPUIssue,LoadIssue,InodeIssue,ServiceIssue,FailedServicesCount,FailedServicesIssue,UpdateIssue,RebootIssue,OverallStatus\n"
     mode: '0644'
   delegate_to: localhost
   become: false
@@ -43,6 +43,15 @@
     - health
     - disk
 
+- name: Check root filesystem inode usage
+  ansible.builtin.shell: |
+    df -Pi / | awk 'NR==2 {gsub("%","",$5); print $5}'
+  register: root_inode_usage
+  changed_when: false
+  tags:
+    - health
+    - inode
+
 - name: Check memory usage percentage
   ansible.builtin.shell: |
     free | awk '/Mem:/ {printf "%.0f", $3/$2 * 100}'
@@ -51,6 +60,28 @@
   tags:
     - health
     - memory
+
+- name: Check CPU usage percentage
+  ansible.builtin.shell: |
+    read cpu user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+    total1=$((user + nice + system + idle + iowait + irq + softirq + steal))
+    idle1=$((idle + iowait))
+    sleep 1
+    read cpu user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+    total2=$((user + nice + system + idle + iowait + irq + softirq + steal))
+    idle2=$((idle + iowait))
+    total_delta=$((total2 - total1))
+    idle_delta=$((idle2 - idle1))
+    if [ "$total_delta" -gt 0 ]; then
+      awk "BEGIN {printf \"%.0f\", (100 * ($total_delta - $idle_delta) / $total_delta)}"
+    else
+      echo 0
+    fi
+  register: cpu_usage
+  changed_when: false
+  tags:
+    - health
+    - cpu
 
 - name: Check 1 minute load average
   ansible.builtin.shell: |
@@ -69,7 +100,7 @@
 
 - name: Check failed systemd services
   ansible.builtin.shell: |
-    systemctl --failed --no-legend --plain | awk '{print $1}' || true
+    systemctl --failed --no-legend --plain | awk '$1 ~ /\.service$/ {print $1}' || true
   register: failed_services
   changed_when: false
   failed_when: false
@@ -84,17 +115,131 @@
     - health
     - service
 
+- name: Check package updates on Amazon Linux or RedHat family
+  ansible.builtin.shell: |
+    set +e
+    dnf check-update --quiet >/tmp/ansible_dnf_updates.txt 2>/dev/null
+    rc=$?
+    if [ "$rc" -eq 100 ]; then
+      echo "updates_available"
+    elif [ "$rc" -eq 0 ]; then
+      echo "no_updates"
+    else
+      echo "update_check_error"
+    fi
+    exit 0
+  register: redhat_update_check
+  changed_when: false
+  failed_when: false
+  when: ansible_os_family == "RedHat"
+  tags:
+    - health
+    - updates
+
+- name: Check package updates on Ubuntu or Debian family
+  ansible.builtin.shell: |
+    apt-get update -qq >/dev/null 2>&1 || true
+    count=$(apt list --upgradable 2>/dev/null | tail -n +2 | wc -l)
+    if [ "$count" -gt 0 ]; then
+      echo "updates_available"
+    else
+      echo "no_updates"
+    fi
+  register: debian_update_check
+  changed_when: false
+  failed_when: false
+  when: ansible_os_family == "Debian"
+  tags:
+    - health
+    - updates
+
+- name: Set package update status
+  ansible.builtin.set_fact:
+    updates_available: >-
+      {{
+        (
+          ansible_os_family == 'RedHat' and
+          redhat_update_check.stdout | trim == 'updates_available'
+        )
+        or
+        (
+          ansible_os_family == 'Debian' and
+          debian_update_check.stdout | trim == 'updates_available'
+        )
+      }}
+  tags:
+    - health
+    - updates
+
+- name: Check reboot required on Ubuntu or Debian family
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: debian_reboot_required_file
+  when: ansible_os_family == "Debian"
+  tags:
+    - health
+    - reboot
+
+- name: Check reboot required on Amazon Linux or RedHat family
+  ansible.builtin.shell: |
+    if command -v needs-restarting >/dev/null 2>&1; then
+      needs-restarting -r >/dev/null 2>&1
+      rc=$?
+      if [ "$rc" -eq 1 ]; then
+        echo "reboot_required"
+      else
+        echo "no_reboot_required"
+      fi
+    else
+      running_kernel=$(uname -r)
+      latest_kernel=$(rpm -q kernel --last 2>/dev/null | head -n 1 | awk '{print $1}' | sed 's/^kernel-//')
+      if [ -n "$latest_kernel" ] && [ "$running_kernel" != "$latest_kernel" ]; then
+        echo "reboot_required"
+      else
+        echo "no_reboot_required"
+      fi
+    fi
+  register: redhat_reboot_check
+  changed_when: false
+  failed_when: false
+  when: ansible_os_family == "RedHat"
+  tags:
+    - health
+    - reboot
+
+- name: Set reboot required status
+  ansible.builtin.set_fact:
+    reboot_required: >-
+      {{
+        (
+          ansible_os_family == 'Debian' and
+          debian_reboot_required_file.stat.exists | default(false)
+        )
+        or
+        (
+          ansible_os_family == 'RedHat' and
+          redhat_reboot_check.stdout | trim == 'reboot_required'
+        )
+      }}
+  tags:
+    - health
+    - reboot
+
 - name: Decide health issue status
   ansible.builtin.set_fact:
     disk_issue_found: "{{ root_disk_usage.stdout | int >= health_thresholds.disk_usage_percent }}"
     memory_issue_found: "{{ memory_usage.stdout | int >= health_thresholds.memory_usage_percent }}"
+    cpu_issue_found: "{{ cpu_usage.stdout | int >= health_thresholds.cpu_usage_percent }}"
     load_issue_found: "{{ load_average.stdout | float >= health_thresholds.load_average_1m }}"
+    inode_issue_found: "{{ root_inode_usage.stdout | int >= health_thresholds.inode_usage_percent }}"
     service_issue_found: >-
       {{
         ssh_service_name not in ansible_facts.services or
         ansible_facts.services[ssh_service_name].state not in ['running', 'active']
       }}
     failed_services_issue_found: "{{ failed_services_count | int > 0 }}"
+    update_issue_found: "{{ updates_available | bool }}"
+    reboot_issue_found: "{{ reboot_required | bool }}"
   tags:
     - health
 
@@ -105,9 +250,13 @@
         'Unhealthy'
         if disk_issue_found | bool
         or memory_issue_found | bool
+        or cpu_issue_found | bool
         or load_issue_found | bool
+        or inode_issue_found | bool
         or service_issue_found | bool
         or failed_services_issue_found | bool
+        or update_issue_found | bool
+        or reboot_issue_found | bool
         else 'Healthy'
       }}
   tags:
@@ -118,15 +267,23 @@
     msg:
       - "Disk usage: {{ root_disk_usage.stdout }}%"
       - "Memory usage: {{ memory_usage.stdout }}%"
+      - "CPU usage: {{ cpu_usage.stdout }}%"
       - "Load average 1m: {{ load_average.stdout }}"
+      - "Inode usage: {{ root_inode_usage.stdout }}%"
       - "SSH service: {{ ssh_service_name }}"
       - "Failed services count: {{ failed_services_count }}"
       - "Failed services: {{ failed_services.stdout_lines }}"
+      - "Updates available: {{ updates_available }}"
+      - "Reboot required: {{ reboot_required }}"
       - "Disk issue found: {{ disk_issue_found }}"
       - "Memory issue found: {{ memory_issue_found }}"
+      - "CPU issue found: {{ cpu_issue_found }}"
       - "Load issue found: {{ load_issue_found }}"
+      - "Inode issue found: {{ inode_issue_found }}"
       - "Service issue found: {{ service_issue_found }}"
       - "Failed services issue found: {{ failed_services_issue_found }}"
+      - "Update issue found: {{ update_issue_found }}"
+      - "Reboot issue found: {{ reboot_issue_found }}"
       - "Overall status: {{ overall_health_status }}"
   tags:
     - health
@@ -143,7 +300,9 @@
 
       Disk Usage: {{ root_disk_usage.stdout }}%
       Memory Usage: {{ memory_usage.stdout }}%
+      CPU Usage: {{ cpu_usage.stdout }}%
       Load Average 1m: {{ load_average.stdout }}
+      Inode Usage: {{ root_inode_usage.stdout }}%
       SSH Service Name: {{ ssh_service_name }}
 
       Failed Services Count: {{ failed_services_count }}
@@ -154,11 +313,18 @@
       - None
       {% endfor %}
 
+      Updates Available: {{ updates_available }}
+      Reboot Required: {{ reboot_required }}
+
       Disk Issue Found: {{ disk_issue_found }}
       Memory Issue Found: {{ memory_issue_found }}
+      CPU Issue Found: {{ cpu_issue_found }}
       Load Issue Found: {{ load_issue_found }}
+      Inode Issue Found: {{ inode_issue_found }}
       Service Issue Found: {{ service_issue_found }}
       Failed Services Issue Found: {{ failed_services_issue_found }}
+      Update Issue Found: {{ update_issue_found }}
+      Reboot Issue Found: {{ reboot_issue_found }}
       Overall Status: {{ overall_health_status }}
   delegate_to: localhost
   become: false
@@ -169,11 +335,12 @@
 - name: Append host result to CSV summary on control node
   ansible.builtin.lineinfile:
     path: "{{ playbook_dir }}/../reports/health-summary.csv"
-    line: "{{ inventory_hostname }},{{ ansible_host }},{{ ansible_distribution }} {{ ansible_distribution_version }},{{ root_disk_usage.stdout }},{{ memory_usage.stdout }},{{ load_average.stdout }},{{ disk_issue_found }},{{ memory_issue_found }},{{ load_issue_found }},{{ service_issue_found }},{{ failed_services_count }},{{ failed_services_issue_found }},{{ overall_health_status }}"
+    line: "{{ inventory_hostname }},{{ ansible_host }},{{ ansible_distribution }} {{ ansible_distribution_version }},{{ root_disk_usage.stdout }},{{ memory_usage.stdout }},{{ cpu_usage.stdout }},{{ load_average.stdout }},{{ root_inode_usage.stdout }},{{ updates_available }},{{ reboot_required }},{{ disk_issue_found }},{{ memory_issue_found }},{{ cpu_issue_found }},{{ load_issue_found }},{{ inode_issue_found }},{{ service_issue_found }},{{ failed_services_count }},{{ failed_services_issue_found }},{{ update_issue_found }},{{ reboot_issue_found }},{{ overall_health_status }}"
     insertafter: EOF
     create: true
   delegate_to: localhost
   become: false
+  throttle: 1
   tags:
     - health
     - report

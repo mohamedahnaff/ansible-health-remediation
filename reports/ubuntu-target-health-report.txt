@@ -1,21 +1,30 @@
 Host: ubuntu-target
 IP: 172.31.42.38
 OS: Ubuntu 26.04
-Kernel: 7.0.0-1006-aws
-Uptime Seconds: 5055
+Kernel: 7.0.0-1010-aws
+Uptime Seconds: 1049
 
-Disk Usage: 32%
+Disk Usage: 45%
 Memory Usage: 36%
-Load Average 1m: 0.02
-SSH Service Name: ssh
+CPU Usage: 0%
+Load Average 1m: 0.34
+Inode Usage: 16%
+SSH Service Name: ssh.service
 
 Failed Services Count: 0
 Failed Services:
 - None
 
+Updates Available: False
+Reboot Required: False
+
 Disk Issue Found: False
 Memory Issue Found: False
+CPU Issue Found: False
 Load Issue Found: False
+Inode Issue Found: False
 Service Issue Found: False
 Failed Services Issue Found: False
+Update Issue Found: False
+Reboot Issue Found: False
 Overall Status: Healthy

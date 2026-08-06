@@ -5,6 +5,8 @@ health_thresholds:
   disk_usage_percent: 85
   memory_usage_percent: 90
   load_average_1m: 4.0
+  cpu_usage_percent: 85
+  inode_usage_percent: 85
 
 cleanup_paths:
   - /tmp

@@ -1,3 +1,3 @@
-Host,IP,OS,DiskUsagePercent,MemoryUsagePercent,LoadAverage1m,DiskIssue,MemoryIssue,LoadIssue,ServiceIssue,FailedServicesCount,FailedServicesIssue,OverallStatus
-amazon-target,172.31.32.215,Amazon 2023,22,18,0.04,False,False,False,False,0,False,Healthy
-ubuntu-target,172.31.42.38,Ubuntu 26.04,32,36,0.02,False,False,False,False,0,False,Healthy
+Host,IP,OS,DiskUsagePercent,MemoryUsagePercent,CPUUsagePercent,LoadAverage1m,InodeUsagePercent,UpdatesAvailable,RebootRequired,DiskIssue,MemoryIssue,CPUIssue,LoadIssue,InodeIssue,ServiceIssue,FailedServicesCount,FailedServicesIssue,UpdateIssue,RebootIssue,OverallStatus
+amazon-target,172.31.32.215,Amazon 2023,22,18,0,0.11,2,False,False,False,False,False,False,False,False,0,False,False,False,Healthy
+ubuntu-target,172.31.42.38,Ubuntu 26.04,45,36,0,0.34,16,False,False,False,False,False,False,False,False,0,False,False,False,Healthy

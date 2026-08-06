@@ -1,7 +1,10 @@
 ---
-- name: Show auto-fix status
+- name: Show remediation control status
   ansible.builtin.debug:
-    msg: "health_auto_fix is set to {{ health_auto_fix }}"
+    msg:
+      - "health_auto_fix: {{ health_auto_fix }}"
+      - "allow_package_update: {{ allow_package_update }}"
+      - "allow_reboot: {{ allow_reboot }}"
 
 - name: Skip remediation when auto fix is disabled
   ansible.builtin.meta: end_host
@@ -11,13 +14,14 @@
   ansible.builtin.shell: |
     find {{ item }} -xdev -type f -mtime +{{ cleanup_file_age_days }} -delete
   loop: "{{ cleanup_paths }}"
-  when: disk_issue_found | bool
+  when:
+    - disk_issue_found | default(false) | bool
   changed_when: true
 
 - name: Clean package cache on Amazon Linux or RedHat family
   ansible.builtin.command: dnf clean all
   when:
-    - disk_issue_found | bool
+    - disk_issue_found | default(false) | bool
     - ansible_os_family == "RedHat"
   changed_when: true
   failed_when: false
@@ -25,7 +29,7 @@
 - name: Clean package cache on Ubuntu or Debian family
   ansible.builtin.command: apt-get clean
   when:
-    - disk_issue_found | bool
+    - disk_issue_found | default(false) | bool
     - ansible_os_family == "Debian"
   changed_when: true
   failed_when: false
@@ -35,23 +39,136 @@
     name: "{{ ssh_service_name }}"
     state: started
     enabled: true
-  when: service_issue_found | bool
+  when:
+    - service_issue_found | default(false) | bool
 
 - name: Install required packages
   ansible.builtin.package:
     name: "{{ required_packages }}"
     state: present
-  when: required_packages | length > 0
+  when:
+    - required_packages | length > 0
+
+- name: Update all packages on Amazon Linux or RedHat family when allowed
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+  when:
+    - allow_package_update | bool
+    - update_issue_found | default(false) | bool
+    - ansible_os_family == "RedHat"
+  tags:
+    - update
+    - remediation
+
+- name: Update apt cache on Ubuntu or Debian family when package update is allowed
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+    force_apt_get: true
+  when:
+    - allow_package_update | bool
+    - update_issue_found | default(false) | bool
+    - ansible_os_family == "Debian"
+  tags:
+    - update
+    - remediation
+
+- name: Upgrade all packages on Ubuntu or Debian family when allowed
+  ansible.builtin.apt:
+    upgrade: dist
+    force_apt_get: true
+    autoremove: true
+    autoclean: true
+  when:
+    - allow_package_update | bool
+    - not allow_phased_updates | bool
+    - update_issue_found | default(false) | bool
+    - ansible_os_family == "Debian"
+  tags:
+    - update
+    - remediation
+
+- name: Force phased package updates on Ubuntu or Debian family when explicitly allowed
+  ansible.builtin.shell: |
+    DEBIAN_FRONTEND=noninteractive apt-get -o APT::Get::Always-Include-Phased-Updates=true dist-upgrade -y
+  when:
+    - allow_package_update | bool
+    - allow_phased_updates | bool
+    - update_issue_found | default(false) | bool
+    - ansible_os_family == "Debian"
+  changed_when: true
+  tags:
+    - update
+    - remediation
+
+- name: Check reboot required again on Ubuntu or Debian family after updates
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: post_update_debian_reboot_required_file
+  when:
+    - ansible_os_family == "Debian"
+  tags:
+    - reboot
+    - remediation
+
+- name: Set post-update reboot required status
+  ansible.builtin.set_fact:
+    post_update_reboot_required: >-
+      {{
+        (
+          ansible_os_family == 'Debian' and
+          post_update_debian_reboot_required_file.stat.exists | default(false)
+        )
+        or
+        (
+          ansible_os_family == 'RedHat' and
+          reboot_required | default(false) | bool
+        )
+      }}
+  tags:
+    - reboot
+    - remediation
+
+- name: Reboot node when explicitly allowed and required
+  ansible.builtin.reboot:
+    msg: "Reboot initiated by Ansible health remediation"
+    reboot_timeout: 600
+    connect_timeout: 30
+    pre_reboot_delay: 5
+    post_reboot_delay: 20
+    test_command: whoami
+  when:
+    - allow_reboot | bool
+    - post_update_reboot_required | default(reboot_required | default(false)) | bool
+  tags:
+    - reboot
+    - remediation
 
 - name: Warn when memory issue is found
   ansible.builtin.debug:
     msg: "Memory usage is high. No unsafe process kill was performed. Manual review recommended."
-  when: memory_issue_found | bool
+  when:
+    - memory_issue_found | default(false) | bool
+
+- name: Warn when CPU issue is found
+  ansible.builtin.debug:
+    msg: "CPU usage is high. No unsafe process kill was performed. Manual review recommended."
+  when:
+    - cpu_issue_found | default(false) | bool
 
 - name: Warn when load issue is found
   ansible.builtin.debug:
     msg: "Load average is high. No unsafe process kill was performed. Manual review recommended."
-  when: load_issue_found | bool
+  when:
+    - load_issue_found | default(false) | bool
+
+- name: Warn when inode issue is found
+  ansible.builtin.debug:
+    msg: "Inode usage is high. Manual cleanup of many small files may be required."
+  when:
+    - inode_issue_found | default(false) | bool
 
 - name: Show remediation completed
   ansible.builtin.debug:

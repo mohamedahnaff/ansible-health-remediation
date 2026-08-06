@@ -2,20 +2,29 @@ Host: amazon-target
 IP: 172.31.32.215
 OS: Amazon 2023
 Kernel: 6.18.39-79.141.amzn2023.x86_64
-Uptime Seconds: 5052
+Uptime Seconds: 7507
 
 Disk Usage: 22%
 Memory Usage: 18%
-Load Average 1m: 0.04
+CPU Usage: 0%
+Load Average 1m: 0.11
+Inode Usage: 2%
 SSH Service Name: sshd.service
 
 Failed Services Count: 0
 Failed Services:
 - None
 
+Updates Available: False
+Reboot Required: False
+
 Disk Issue Found: False
 Memory Issue Found: False
+CPU Issue Found: False
 Load Issue Found: False
+Inode Issue Found: False
 Service Issue Found: False
 Failed Services Issue Found: False
+Update Issue Found: False
+Reboot Issue Found: False
 Overall Status: Healthy

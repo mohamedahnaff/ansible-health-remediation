@@ -1,6 +1,11 @@
 ---
 health_auto_fix: false
+allow_package_update: false
+allow_phased_updates: false
+allow_reboot: false
+
 cleanup_paths:
   - /tmp
+
 cleanup_file_age_days: 7
 required_packages: []
