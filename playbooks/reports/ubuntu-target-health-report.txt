@@ -1,0 +1,15 @@
+Host: ubuntu-target
+IP: 172.31.42.38
+OS: Ubuntu 26.04
+Kernel: 7.0.0-1006-aws
+Uptime Seconds: 3591
+
+Disk Usage: 32%
+Memory Usage: 35%
+Load Average 1m: 0.03
+SSH Service Name: ssh
+
+Disk Issue Found: False
+Memory Issue Found: False
+Load Issue Found: False
+Service Issue Found: False

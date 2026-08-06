@@ -1,0 +1,83 @@
+---
+- name: Display basic server information
+  ansible.builtin.debug:
+    msg:
+      - "Host: {{ inventory_hostname }}"
+      - "IP: {{ ansible_host }}"
+      - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      - "Kernel: {{ ansible_kernel }}"
+      - "Uptime seconds: {{ ansible_uptime_seconds }}"
+
+- name: Check root filesystem disk usage
+  ansible.builtin.shell: |
+    df -P / | awk 'NR==2 {gsub("%","",$5); print $5}'
+  register: root_disk_usage
+  changed_when: false
+
+- name: Check memory usage percentage
+  ansible.builtin.shell: |
+    free | awk '/Mem:/ {printf "%.0f", $3/$2 * 100}'
+  register: memory_usage
+  changed_when: false
+
+- name: Check 1 minute load average
+  ansible.builtin.shell: |
+    awk '{print $1}' /proc/loadavg
+  register: load_average
+  changed_when: false
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Decide health issue status
+  ansible.builtin.set_fact:
+    disk_issue_found: "{{ root_disk_usage.stdout | int >= health_thresholds.disk_usage_percent }}"
+    memory_issue_found: "{{ memory_usage.stdout | int >= health_thresholds.memory_usage_percent }}"
+    load_issue_found: "{{ load_average.stdout | float >= health_thresholds.load_average_1m }}"
+    service_issue_found: >-
+      {{
+        ssh_service_name not in ansible_facts.services or
+        ansible_facts.services[ssh_service_name].state != 'running'
+      }}
+
+- name: Display health summary
+  ansible.builtin.debug:
+    msg:
+      - "Disk usage: {{ root_disk_usage.stdout }}%"
+      - "Memory usage: {{ memory_usage.stdout }}%"
+      - "Load average 1m: {{ load_average.stdout }}"
+      - "SSH service: {{ ssh_service_name }}"
+      - "Disk issue found: {{ disk_issue_found }}"
+      - "Memory issue found: {{ memory_issue_found }}"
+      - "Load issue found: {{ load_issue_found }}"
+      - "Service issue found: {{ service_issue_found }}"
+
+- name: Create local reports directory on control node
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../reports"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+
+- name: Save health report on control node
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../reports/{{ inventory_hostname }}-health-report.txt"
+    content: |
+      Host: {{ inventory_hostname }}
+      IP: {{ ansible_host }}
+      OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      Kernel: {{ ansible_kernel }}
+      Uptime Seconds: {{ ansible_uptime_seconds }}
+
+      Disk Usage: {{ root_disk_usage.stdout }}%
+      Memory Usage: {{ memory_usage.stdout }}%
+      Load Average 1m: {{ load_average.stdout }}
+      SSH Service Name: {{ ssh_service_name }}
+
+      Disk Issue Found: {{ disk_issue_found }}
+      Memory Issue Found: {{ memory_issue_found }}
+      Load Issue Found: {{ load_issue_found }}
+      Service Issue Found: {{ service_issue_found }}
+  delegate_to: localhost
+  become: false

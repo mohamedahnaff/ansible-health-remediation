@@ -1,0 +1,58 @@
+---
+- name: Show auto-fix status
+  ansible.builtin.debug:
+    msg: "health_auto_fix is set to {{ health_auto_fix }}"
+
+- name: Skip remediation when auto fix is disabled
+  ansible.builtin.meta: end_host
+  when: not health_auto_fix | bool
+
+- name: Clean old files from cleanup paths when disk issue is found
+  ansible.builtin.shell: |
+    find {{ item }} -xdev -type f -mtime +{{ cleanup_file_age_days }} -delete
+  loop: "{{ cleanup_paths }}"
+  when: disk_issue_found | bool
+  changed_when: true
+
+- name: Clean package cache on Amazon Linux or RedHat family
+  ansible.builtin.command: dnf clean all
+  when:
+    - disk_issue_found | bool
+    - ansible_os_family == "RedHat"
+  changed_when: true
+  failed_when: false
+
+- name: Clean package cache on Ubuntu or Debian family
+  ansible.builtin.command: apt-get clean
+  when:
+    - disk_issue_found | bool
+    - ansible_os_family == "Debian"
+  changed_when: true
+  failed_when: false
+
+- name: Ensure SSH service is running and enabled
+  ansible.builtin.service:
+    name: "{{ ssh_service_name }}"
+    state: started
+    enabled: true
+  when: service_issue_found | bool
+
+- name: Install required packages
+  ansible.builtin.package:
+    name: "{{ required_packages }}"
+    state: present
+  when: required_packages | length > 0
+
+- name: Warn when memory issue is found
+  ansible.builtin.debug:
+    msg: "Memory usage is high. No unsafe process kill was performed. Manual review recommended."
+  when: memory_issue_found | bool
+
+- name: Warn when load issue is found
+  ansible.builtin.debug:
+    msg: "Load average is high. No unsafe process kill was performed. Manual review recommended."
+  when: load_issue_found | bool
+
+- name: Show remediation completed
+  ansible.builtin.debug:
+    msg: "Safe remediation completed on {{ inventory_hostname }}"

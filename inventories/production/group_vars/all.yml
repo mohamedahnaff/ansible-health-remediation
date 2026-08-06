@@ -1,0 +1,12 @@
+---
+health_auto_fix: true
+
+health_thresholds:
+  disk_usage_percent: 85
+  memory_usage_percent: 90
+  load_average_1m: 4.0
+
+cleanup_paths:
+  - /tmp
+
+cleanup_file_age_days: 7

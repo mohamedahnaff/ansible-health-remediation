@@ -1,0 +1,9 @@
+---
+health_thresholds:
+  disk_usage_percent: 85
+  memory_usage_percent: 90
+  load_average_1m: 4.0
+
+required_packages: []
+cleanup_paths:
+  - /tmp

@@ -1,0 +1,4 @@
+---
+required_packages:
+  - curl-minimal
+  - vim-enhanced

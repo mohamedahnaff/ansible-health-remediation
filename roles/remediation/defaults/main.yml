@@ -1,0 +1,6 @@
+---
+health_auto_fix: false
+cleanup_paths:
+  - /tmp
+cleanup_file_age_days: 7
+required_packages: []

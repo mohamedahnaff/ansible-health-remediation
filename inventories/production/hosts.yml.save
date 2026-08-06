@@ -1,0 +1,24 @@
+all:
+  children:
+    amazon_linux:
+      hosts:
+        amazon-target:
+          ansible_host: 172.31.32.215
+      vars:
+        ansible_user: ec2-user
+        ssh_service_name: sshd.service
+        package_manager_family: redhat
+
+    ubuntu:
+      hosts:
+        ubuntu-target:
+          ansible_host: 172.31.42.38
+      vars:
+        ansible_user: ubuntu
+        ssh_service_name: ssh
+        package_manager_family: debian
+
+    linux_servers:
+      children:
+        amazon_linux:
+        ubuntu:
