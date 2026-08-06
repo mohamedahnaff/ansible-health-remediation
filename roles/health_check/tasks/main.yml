@@ -1,4 +1,28 @@
 ---
+- name: Create local reports directory on control node
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../reports"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - health
+    - report
+
+- name: Create CSV summary header on control node
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../reports/health-summary.csv"
+    content: "Host,IP,OS,DiskUsagePercent,MemoryUsagePercent,LoadAverage1m,DiskIssue,MemoryIssue,LoadIssue,ServiceIssue,FailedServicesCount,FailedServicesIssue,OverallStatus\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - health
+    - report
+
 - name: Display basic server information
   ansible.builtin.debug:
     msg:
@@ -7,27 +31,58 @@
       - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
       - "Kernel: {{ ansible_kernel }}"
       - "Uptime seconds: {{ ansible_uptime_seconds }}"
+  tags:
+    - health
 
 - name: Check root filesystem disk usage
   ansible.builtin.shell: |
     df -P / | awk 'NR==2 {gsub("%","",$5); print $5}'
   register: root_disk_usage
   changed_when: false
+  tags:
+    - health
+    - disk
 
 - name: Check memory usage percentage
   ansible.builtin.shell: |
     free | awk '/Mem:/ {printf "%.0f", $3/$2 * 100}'
   register: memory_usage
   changed_when: false
+  tags:
+    - health
+    - memory
 
 - name: Check 1 minute load average
   ansible.builtin.shell: |
     awk '{print $1}' /proc/loadavg
   register: load_average
   changed_when: false
+  tags:
+    - health
+    - load
 
 - name: Gather service facts
   ansible.builtin.service_facts:
+  tags:
+    - health
+    - service
+
+- name: Check failed systemd services
+  ansible.builtin.shell: |
+    systemctl --failed --no-legend --plain | awk '{print $1}' || true
+  register: failed_services
+  changed_when: false
+  failed_when: false
+  tags:
+    - health
+    - service
+
+- name: Count failed systemd services
+  ansible.builtin.set_fact:
+    failed_services_count: "{{ failed_services.stdout_lines | length }}"
+  tags:
+    - health
+    - service
 
 - name: Decide health issue status
   ansible.builtin.set_fact:
@@ -37,8 +92,26 @@
     service_issue_found: >-
       {{
         ssh_service_name not in ansible_facts.services or
-        ansible_facts.services[ssh_service_name].state != 'running'
+        ansible_facts.services[ssh_service_name].state not in ['running', 'active']
       }}
+    failed_services_issue_found: "{{ failed_services_count | int > 0 }}"
+  tags:
+    - health
+
+- name: Decide overall health status
+  ansible.builtin.set_fact:
+    overall_health_status: >-
+      {{
+        'Unhealthy'
+        if disk_issue_found | bool
+        or memory_issue_found | bool
+        or load_issue_found | bool
+        or service_issue_found | bool
+        or failed_services_issue_found | bool
+        else 'Healthy'
+      }}
+  tags:
+    - health
 
 - name: Display health summary
   ansible.builtin.debug:
@@ -47,20 +120,18 @@
       - "Memory usage: {{ memory_usage.stdout }}%"
       - "Load average 1m: {{ load_average.stdout }}"
       - "SSH service: {{ ssh_service_name }}"
+      - "Failed services count: {{ failed_services_count }}"
+      - "Failed services: {{ failed_services.stdout_lines }}"
       - "Disk issue found: {{ disk_issue_found }}"
       - "Memory issue found: {{ memory_issue_found }}"
       - "Load issue found: {{ load_issue_found }}"
       - "Service issue found: {{ service_issue_found }}"
+      - "Failed services issue found: {{ failed_services_issue_found }}"
+      - "Overall status: {{ overall_health_status }}"
+  tags:
+    - health
 
-- name: Create local reports directory on control node
-  ansible.builtin.file:
-    path: "{{ playbook_dir }}/../reports"
-    state: directory
-    mode: '0755'
-  delegate_to: localhost
-  become: false
-
-- name: Save health report on control node
+- name: Save text health report on control node
   ansible.builtin.copy:
     dest: "{{ playbook_dir }}/../reports/{{ inventory_hostname }}-health-report.txt"
     content: |
@@ -75,9 +146,34 @@
       Load Average 1m: {{ load_average.stdout }}
       SSH Service Name: {{ ssh_service_name }}
 
+      Failed Services Count: {{ failed_services_count }}
+      Failed Services:
+      {% for service in failed_services.stdout_lines %}
+      - {{ service }}
+      {% else %}
+      - None
+      {% endfor %}
+
       Disk Issue Found: {{ disk_issue_found }}
       Memory Issue Found: {{ memory_issue_found }}
       Load Issue Found: {{ load_issue_found }}
       Service Issue Found: {{ service_issue_found }}
+      Failed Services Issue Found: {{ failed_services_issue_found }}
+      Overall Status: {{ overall_health_status }}
   delegate_to: localhost
   become: false
+  tags:
+    - health
+    - report
+
+- name: Append host result to CSV summary on control node
+  ansible.builtin.lineinfile:
+    path: "{{ playbook_dir }}/../reports/health-summary.csv"
+    line: "{{ inventory_hostname }},{{ ansible_host }},{{ ansible_distribution }} {{ ansible_distribution_version }},{{ root_disk_usage.stdout }},{{ memory_usage.stdout }},{{ load_average.stdout }},{{ disk_issue_found }},{{ memory_issue_found }},{{ load_issue_found }},{{ service_issue_found }},{{ failed_services_count }},{{ failed_services_issue_found }},{{ overall_health_status }}"
+    insertafter: EOF
+    create: true
+  delegate_to: localhost
+  become: false
+  tags:
+    - health
+    - report
