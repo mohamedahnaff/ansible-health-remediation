@@ -1,0 +1,32 @@
+# Ansible temporary/cache files
+.fact_cache/
+*.retry
+*.log
+
+# SSH/private keys
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+
+# Sensitive files
+.vault_pass
+.vault-password
+secrets.yml
+vault.yml
+
+# Report history/logs
+reports/history/
+reports/*.log
+
+# Python/cache
+__pycache__/
+*.pyc
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/
+reports/*.txt
+reports/*.csv
+reports/*.html
