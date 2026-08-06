@@ -2,12 +2,12 @@ Host: ubuntu-target
 IP: 172.31.42.38
 OS: Ubuntu 26.04
 Kernel: 7.0.0-1010-aws
-Uptime Seconds: 1049
+Uptime Seconds: 1779
 
 Disk Usage: 45%
-Memory Usage: 36%
+Memory Usage: 38%
 CPU Usage: 0%
-Load Average 1m: 0.34
+Load Average 1m: 0.07
 Inode Usage: 16%
 SSH Service Name: ssh.service
 

@@ -1,0 +1,240 @@
+---
+- name: Generate HTML health dashboard from CSV report
+  hosts: localhost
+  gather_facts: false
+  become: false
+
+  vars:
+    report_dir: "{{ playbook_dir }}/../reports"
+    csv_file: "{{ report_dir }}/health-summary.csv"
+    html_file: "{{ report_dir }}/health-dashboard.html"
+
+  tasks:
+    - name: Check if CSV summary exists
+      ansible.builtin.stat:
+        path: "{{ csv_file }}"
+      register: csv_status
+
+    - name: Fail if CSV summary does not exist
+      ansible.builtin.fail:
+        msg: "CSV summary file not found. Run: ansible-playbook playbooks/site.yml --tags health"
+      when: not csv_status.stat.exists
+
+    - name: Read CSV summary file
+      ansible.builtin.slurp:
+        src: "{{ csv_file }}"
+      register: csv_content
+
+    - name: Convert CSV content to lines
+      ansible.builtin.set_fact:
+        csv_lines: "{{ (csv_content.content | b64decode).splitlines() }}"
+
+    - name: Extract CSV headers
+      ansible.builtin.set_fact:
+        csv_headers: "{{ csv_lines[0].split(',') }}"
+
+    - name: Extract CSV data rows
+      ansible.builtin.set_fact:
+        csv_rows: "{{ csv_lines[1:] }}"
+
+    - name: Build HTML dashboard
+      ansible.builtin.copy:
+        dest: "{{ html_file }}"
+        mode: '0644'
+        content: |
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Ansible Health Dashboard</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                background: #f4f6f8;
+                margin: 0;
+                padding: 20px;
+                color: #222;
+              }
+
+              .container {
+                max-width: 1400px;
+                margin: auto;
+              }
+
+              h1 {
+                color: #1f2937;
+                margin-bottom: 5px;
+              }
+
+              .subtitle {
+                color: #6b7280;
+                margin-bottom: 25px;
+              }
+
+              .cards {
+                display: flex;
+                gap: 20px;
+                margin-bottom: 25px;
+                flex-wrap: wrap;
+              }
+
+              .card {
+                background: white;
+                border-radius: 10px;
+                padding: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                min-width: 180px;
+              }
+
+              .card-title {
+                font-size: 14px;
+                color: #6b7280;
+                margin-bottom: 8px;
+              }
+
+              .card-value {
+                font-size: 28px;
+                font-weight: bold;
+              }
+
+              .healthy {
+                color: #15803d;
+                font-weight: bold;
+              }
+
+              .unhealthy {
+                color: #b91c1c;
+                font-weight: bold;
+              }
+
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                background: white;
+                border-radius: 10px;
+                overflow: hidden;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+              }
+
+              th {
+                background: #111827;
+                color: white;
+                padding: 12px;
+                text-align: left;
+                font-size: 13px;
+              }
+
+              td {
+                padding: 10px 12px;
+                border-bottom: 1px solid #e5e7eb;
+                font-size: 13px;
+              }
+
+              tr:hover {
+                background: #f9fafb;
+              }
+
+              .status-badge {
+                padding: 5px 10px;
+                border-radius: 999px;
+                font-size: 12px;
+                font-weight: bold;
+              }
+
+              .status-healthy {
+                background: #dcfce7;
+                color: #166534;
+              }
+
+              .status-unhealthy {
+                background: #fee2e2;
+                color: #991b1b;
+              }
+
+              .footer {
+                margin-top: 20px;
+                color: #6b7280;
+                font-size: 12px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>Ansible Health Dashboard</h1>
+              <div class="subtitle">
+                Generated from health-summary.csv on the Ansible control node.
+              </div>
+
+              {% set healthy_count = 0 %}
+              {% set unhealthy_count = 0 %}
+              {% for row in csv_rows %}
+              {% set cols = row.split(',') %}
+              {% if cols[-1] == 'Healthy' %}
+              {% set healthy_count = healthy_count + 1 %}
+              {% else %}
+              {% set unhealthy_count = unhealthy_count + 1 %}
+              {% endif %}
+              {% endfor %}
+
+              <div class="cards">
+                <div class="card">
+                  <div class="card-title">Total Hosts</div>
+                  <div class="card-value">{{ csv_rows | length }}</div>
+                </div>
+
+                <div class="card">
+                  <div class="card-title">Healthy Hosts</div>
+                  <div class="card-value healthy">
+                    {{ csv_rows | select('search', 'Healthy$') | list | length }}
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-title">Unhealthy Hosts</div>
+                  <div class="card-value unhealthy">
+                    {{ csv_rows | reject('search', 'Healthy$') | list | length }}
+                  </div>
+                </div>
+              </div>
+
+              <table>
+                <thead>
+                  <tr>
+                    {% for header in csv_headers %}
+                    <th>{{ header }}</th>
+                    {% endfor %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in csv_rows %}
+                  {% set cols = row.split(',') %}
+                  <tr>
+                    {% for col in cols %}
+                    {% if loop.index == cols | length %}
+                    <td>
+                      {% if col == 'Healthy' %}
+                      <span class="status-badge status-healthy">{{ col }}</span>
+                      {% else %}
+                      <span class="status-badge status-unhealthy">{{ col }}</span>
+                      {% endif %}
+                    </td>
+                    {% else %}
+                    <td>{{ col }}</td>
+                    {% endif %}
+                    {% endfor %}
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+
+              <div class="footer">
+                Dashboard generated by Ansible. Source file: health-summary.csv
+              </div>
+            </div>
+          </body>
+          </html>
+
+    - name: Show dashboard location
+      ansible.builtin.debug:
+        msg: "HTML dashboard generated at {{ html_file }}"
